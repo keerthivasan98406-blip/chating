@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Secret Chat</title>
+  <link rel="stylesheet" href="style.css"/>
+</head>
+<body>
+
+<!-- Entry Screen -->
+<div id="entry-screen">
+  <div class="entry-card">
+    <div class="entry-logo">💬</div>
+    <h1>Secret Chat</h1>
+    <p>Your private space — enter a room key to connect</p>
+    <input type="text" id="name-input" placeholder="Your name..." maxlength="20"/>
+    <input type="text" id="room-key-input" placeholder="Room key..." maxlength="20"/>
+    <div class="btn-group">
+      <button class="btn btn-primary" onclick="joinRoom()">Join Room</button>
+      <button class="btn btn-secondary" onclick="generateKey()">Generate Key</button>
+    </div>
+    <p class="hint">Share the same key with your partner to connect</p>
+  </div>
+</div>
+
+<!-- Chat Screen -->
+<div id="chat-screen" class="hidden">
+  <div class="chat-header">
+    <div class="avatar">👤</div>
+    <div class="header-info">
+      <div class="name" id="room-display">Room</div>
+      <div class="status"><span class="status-dot"></span> online</div>
+    </div>
+    <div class="header-actions">
+      <button class="hbtn" onclick="startCall('audio')" title="Voice call">📞</button>
+      <button class="hbtn" onclick="startCall('video')" title="Video call">📹</button>
+      <button class="hbtn danger" onclick="deleteAll()" title="Delete all messages">🗑️</button>
+      <button class="hbtn" onclick="leaveRoom()" title="Leave room">✕</button>
+    </div>
+  </div>
+
+  <div id="messages" class="messages"></div>
+
+  <div class="chat-input-area">
+    <label class="attach-btn" title="Send image">
+      📎
+      <input type="file" id="img-input" accept="image/*" onchange="sendImage(event)" hidden/>
+    </label>
+    <div class="msg-input-wrap">
+      <input type="text" id="msg-input" placeholder="Type a message"
+             onkeydown="if(event.key==='Enter') sendMessage()"/>
+    </div>
+    <button class="send-btn" onclick="sendMessage()">
+      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+        <path d="M1.101 21.757L23.8 12.028 1.101 2.3l.011 7.912 13.623 1.816-13.623 1.817-.011 7.912z"/>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- Call Overlay -->
+<div id="call-overlay" class="hidden">
+  <div class="call-info">
+    <div class="call-name" id="call-partner-name">Partner</div>
+    <div class="call-status" id="call-status-text">Calling...</div>
+  </div>
+  <div class="call-videos">
+    <video id="remote-video" autoplay playsinline></video>
+    <video id="local-video" autoplay playsinline muted></video>
+  </div>
+  <div class="call-controls">
+    <button class="call-btn mute" id="mute-btn" onclick="toggleMute()" title="Mute">🎤</button>
+    <button class="call-btn end" onclick="endCall()" title="End call">📵</button>
+    <button class="call-btn cam" id="cam-btn" onclick="toggleCam()" title="Camera">📷</button>
+  </div>
+</div>
+
+<!-- Incoming Call Popup -->
+<div id="incoming-call" class="hidden">
+  <div class="ic-name" id="ic-caller-name">Someone</div>
+  <div class="ic-type" id="ic-call-type">Video Call</div>
+  <div class="ic-btns">
+    <button class="ic-btn reject" onclick="rejectCall()">📵</button>
+    <button class="ic-btn accept" onclick="acceptCall()">📞</button>
+  </div>
+</div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
