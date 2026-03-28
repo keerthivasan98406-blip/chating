@@ -101,8 +101,11 @@ function startChat() {
   // Delete signal from other device
   socket.on('delete', () => {
     localStorage.removeItem('msgs_' + roomKey);
-    clearChatUI();
-    appendSystemMsg('Chat cleared');
+    clearSession();
+    window.close();
+    // fallback if window.close() is blocked
+    document.body.innerHTML = '';
+    window.location.replace('about:blank');
   });
 
   // WebRTC signaling
@@ -150,11 +153,14 @@ function sendImage(event) {
 }
 
 function deleteAll() {
-  if (!confirm('Delete all messages for both sides?')) return;
+  if (!confirm('Delete all messages and close for both sides?')) return;
   localStorage.removeItem('msgs_' + roomKey);
-  clearChatUI();
-  appendSystemMsg('Chat cleared');
+  clearSession();
   if (socket) socket.emit('delete');
+  window.close();
+  // fallback if window.close() is blocked by browser
+  document.body.innerHTML = '';
+  window.location.replace('about:blank');
 }
 
 // ─── Local storage (for refresh persistence) ──────────────────────────────────
