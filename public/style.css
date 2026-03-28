@@ -269,6 +269,12 @@ html, body {
   border: 1px solid var(--border2);
 }
 
+.msg audio {
+  display: block; width: 100%; min-width: 200px;
+  height: 36px; outline: none;
+  filter: invert(0.85) sepia(0.3) hue-rotate(10deg);
+}
+
 .msg-meta {
   display: flex; align-items: center; justify-content: flex-end;
   gap: 4px; margin-top: 5px;
@@ -337,6 +343,28 @@ html, body {
   transition: all 0.15s;
 }
 .send-btn:active { transform: scale(0.93); box-shadow: none; }
+
+.mic-btn {
+  width: 40px; height: 40px; border-radius: 50%;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text-dim);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; flex-shrink: 0;
+  transition: all 0.15s;
+  user-select: none; -webkit-user-select: none;
+}
+.mic-btn:hover { border-color: var(--gold); color: var(--gold); }
+.mic-btn.recording {
+  background: rgba(248,113,113,0.15);
+  border-color: var(--red);
+  color: var(--red);
+  animation: micPulse 0.8s infinite;
+}
+@keyframes micPulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(248,113,113,0.4); }
+  50%     { box-shadow: 0 0 0 8px rgba(248,113,113,0); }
+}
 
 /* ─────────────────────────────────────────────
    CALL OVERLAY

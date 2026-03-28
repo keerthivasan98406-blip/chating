@@ -195,6 +195,11 @@ function renderMessage(data) {
     img.src = data.data; img.alt = 'image';
     img.onclick = () => openLightbox(data.data);
     bubble.appendChild(img);
+  } else if (data.type === 'audio') {
+    const audio = document.createElement('audio');
+    audio.controls = true;
+    audio.src = data.data;
+    bubble.appendChild(audio);
   } else {
     const span = document.createElement('span');
     span.textContent = data.text;
@@ -383,6 +388,59 @@ function toggleCam() {
   isCamOff = !isCamOff;
   localStream.getVideoTracks().forEach(t => t.enabled = !isCamOff);
   document.getElementById('cam-btn').textContent = isCamOff ? '�' : '📷';
+}
+
+// ─── Voice Recording ─────────────────────────────────────────────────────────
+let mediaRecorder = null;
+let audioChunks = [];
+let recordingStream = null;
+
+async function startRecording(e) {
+  if (e) e.preventDefault();
+  if (mediaRecorder) return;
+  try {
+    recordingStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    mediaRecorder = new MediaRecorder(recordingStream);
+    audioChunks = [];
+    mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+    mediaRecorder.onstop = sendVoiceMessage;
+    mediaRecorder.start();
+    document.getElementById('mic-btn').classList.add('recording');
+  } catch(err) {
+    alert('Microphone access denied.');
+  }
+}
+
+function stopRecording(e) {
+  if (e) e.preventDefault();
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    mediaRecorder.stop();
+    recordingStream.getTracks().forEach(t => t.stop());
+    mediaRecorder = null;
+    recordingStream = null;
+    document.getElementById('mic-btn').classList.remove('recording');
+  }
+}
+
+function sendVoiceMessage() {
+  if (audioChunks.length === 0) return;
+  const blob = new Blob(audioChunks, { type: 'audio/webm' });
+  if (blob.size > 3 * 1024 * 1024) { alert('Voice message too long (max ~3MB).'); return; }
+  const reader = new FileReader();
+  reader.onload = e => {
+    const msg = {
+      type: 'audio',
+      data: e.target.result,
+      sender: senderID,
+      name: senderName,
+      time: Date.now()
+    };
+    renderMessage(msg);
+    saveMessageLocal(msg);
+    socket.emit('message', msg);
+  };
+  reader.readAsDataURL(blob);
+  audioChunks = [];
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
