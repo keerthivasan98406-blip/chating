@@ -10,6 +10,8 @@ const iceServers = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' },
+    { urls: 'stun:stun2.l.google.com:19302' },
+    { urls: 'stun:stun3.l.google.com:19302' },
     {
       urls: 'turn:openrelay.metered.ca:80',
       username: 'openrelayproject',
@@ -22,6 +24,11 @@ const iceServers = {
     },
     {
       urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:80?transport=tcp',
       username: 'openrelayproject',
       credential: 'openrelayproject'
     }
@@ -225,27 +232,69 @@ function openLightbox(src) {
 }
 
 // ─── WebRTC Calls ─────────────────────────────────────────────────────────────
+function createPC() {
+  const p = new RTCPeerConnection(iceServers);
+
+  p.onicecandidate = e => {
+    if (e.candidate) socket.emit('ice', { candidate: e.candidate });
+  };
+
+  // When remote stream arrives, attach to video element
+  p.ontrack = e => {
+    const remoteVid = document.getElementById('remote-video');
+    if (remoteVid.srcObject !== e.streams[0]) {
+      remoteVid.srcObject = e.streams[0];
+      document.getElementById('call-status-text').textContent = 'Connected';
+    }
+  };
+
+  // Monitor connection state — show status to user
+  p.onconnectionstatechange = () => {
+    const statusEl = document.getElementById('call-status-text');
+    if (!statusEl) return;
+    switch (p.connectionState) {
+      case 'connecting':    statusEl.textContent = 'Connecting...'; break;
+      case 'connected':     statusEl.textContent = 'Connected'; break;
+      case 'disconnected':  statusEl.textContent = 'Reconnecting...'; break;
+      case 'failed':
+        statusEl.textContent = 'Connection failed — retrying...';
+        p.restartIce(); // auto retry ICE
+        break;
+      case 'closed': break;
+    }
+  };
+
+  p.oniceconnectionstatechange = () => {
+    if (p.iceConnectionState === 'failed') p.restartIce();
+  };
+
+  return p;
+}
+
 async function startCall(type) {
   callType = type;
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      video: type === 'video' ? { width: 1280, height: 720 } : false,
+      video: type === 'video' ? { width: 1280, height: 720, facingMode: 'user' } : false,
       audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
     });
-  } catch(e) { alert('Allow camera/microphone access first.'); return; }
+  } catch(e) {
+    // Fallback to lower resolution if HD fails
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({
+        video: type === 'video',
+        audio: true
+      });
+    } catch(e2) { alert('Allow camera/microphone access first.'); return; }
+  }
 
   document.getElementById('local-video').srcObject = localStream;
   document.getElementById('call-partner-name').textContent = senderName;
   document.getElementById('call-status-text').textContent = 'Calling...';
   show('call-overlay');
 
-  pc = new RTCPeerConnection(iceServers);
+  pc = createPC();
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-  pc.onicecandidate = e => { if (e.candidate) socket.emit('ice', { candidate: e.candidate }); };
-  pc.ontrack = e => {
-    document.getElementById('remote-video').srcObject = e.streams[0];
-    document.getElementById('call-status-text').textContent = 'Connected';
-  };
 
   const offer = await pc.createOffer();
   await pc.setLocalDescription(offer);
@@ -266,20 +315,22 @@ async function acceptCall() {
 
   try {
     localStream = await navigator.mediaDevices.getUserMedia({
-      video: callType === 'video' ? { width: 1280, height: 720 } : false,
+      video: callType === 'video' ? { width: 1280, height: 720, facingMode: 'user' } : false,
       audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
     });
-  } catch(e) { alert('Allow camera/microphone access first.'); return; }
+  } catch(e) {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ video: callType === 'video', audio: true });
+    } catch(e2) { alert('Allow camera/microphone access first.'); return; }
+  }
 
   document.getElementById('local-video').srcObject = localStream;
   document.getElementById('call-partner-name').textContent = data.callerName || 'Partner';
   document.getElementById('call-status-text').textContent = 'Connected';
   show('call-overlay');
 
-  pc = new RTCPeerConnection(iceServers);
+  pc = createPC();
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-  pc.onicecandidate = e => { if (e.candidate) socket.emit('ice', { candidate: e.candidate }); };
-  pc.ontrack = e => { document.getElementById('remote-video').srcObject = e.streams[0]; };
 
   await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
   const answer = await pc.createAnswer();
