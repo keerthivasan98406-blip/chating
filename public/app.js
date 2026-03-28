@@ -6,7 +6,27 @@ let socket = null;
 let pc = null, localStream = null, callType = null;
 let isMuted = false, isCamOff = false;
 
-const iceServers = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
+const iceServers = {
+  iceServers: [
+    { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:stun1.l.google.com:19302' },
+    {
+      urls: 'turn:openrelay.metered.ca:80',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    },
+    {
+      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+      username: 'openrelayproject',
+      credential: 'openrelayproject'
+    }
+  ]
+};
 
 // ─── Entry ────────────────────────────────────────────────────────────────────
 function generateKey() {
@@ -208,7 +228,10 @@ function openLightbox(src) {
 async function startCall(type) {
   callType = type;
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: type === 'video', audio: true });
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: type === 'video' ? { width: 1280, height: 720 } : false,
+      audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
+    });
   } catch(e) { alert('Allow camera/microphone access first.'); return; }
 
   document.getElementById('local-video').srcObject = localStream;
@@ -242,7 +265,10 @@ async function acceptCall() {
   callType = data.callType;
 
   try {
-    localStream = await navigator.mediaDevices.getUserMedia({ video: callType === 'video', audio: true });
+    localStream = await navigator.mediaDevices.getUserMedia({
+      video: callType === 'video' ? { width: 1280, height: 720 } : false,
+      audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
+    });
   } catch(e) { alert('Allow camera/microphone access first.'); return; }
 
   document.getElementById('local-video').srcObject = localStream;
