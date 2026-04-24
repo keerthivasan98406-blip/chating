@@ -199,6 +199,9 @@ function openLightbox(src) {
 }
 
 // ─── WebRTC ───────────────────────────────────────────────────────────────────
+let videoRelayInterval = null;
+let relayCanvas = null;
+
 function createPC() {
   const p = new RTCPeerConnection(iceServers);
 
@@ -217,23 +220,86 @@ function createPC() {
     }
     rv.play().catch(() => {});
     document.getElementById('call-status-text').textContent = 'Connected';
+    // Stop relay if WebRTC succeeded
+    stopVideoRelay();
   };
 
   p.onconnectionstatechange = () => {
     console.log('connectionState:', p.connectionState);
     const s = document.getElementById('call-status-text');
     if (!s) return;
-    if (p.connectionState === 'connected')    s.textContent = 'Connected';
+    if (p.connectionState === 'connected') {
+      s.textContent = 'Connected';
+      stopVideoRelay();
+    }
     if (p.connectionState === 'disconnected') s.textContent = 'Reconnecting...';
-    if (p.connectionState === 'failed')       { s.textContent = 'Retrying...'; p.restartIce(); }
+    if (p.connectionState === 'failed') {
+      console.log('WebRTC failed — switching to relay mode');
+      s.textContent = 'Connected (relay)';
+      startVideoRelay();
+    }
   };
 
   p.oniceconnectionstatechange = () => {
     console.log('iceState:', p.iceConnectionState);
-    if (p.iceConnectionState === 'failed') p.restartIce();
+    if (p.iceConnectionState === 'failed') {
+      p.restartIce();
+      // Also start relay as fallback
+      setTimeout(() => {
+        if (p.iceConnectionState !== 'connected') startVideoRelay();
+      }, 3000);
+    }
   };
 
   return p;
+}
+
+// ─── Socket.io Video Relay (fallback when WebRTC fails) ──────────────────────
+function startVideoRelay() {
+  if (videoRelayInterval || !localStream) return;
+  console.log('Starting video relay via Socket.io');
+
+  // Listen for remote frames
+  socket.on('video-frame', (data) => {
+    const rv = document.getElementById('remote-video');
+    if (!rv._relayImg) {
+      // Replace video element with an img for relay display
+      const img = document.createElement('img');
+      img.id = 'relay-img';
+      img.style.cssText = 'width:100%;height:100%;object-fit:cover;display:block;';
+      rv.parentNode.insertBefore(img, rv);
+      rv.style.display = 'none';
+      rv._relayImg = img;
+    }
+    rv._relayImg.src = data.frame;
+    document.getElementById('call-status-text').textContent = 'Connected';
+  });
+
+  // Send local video frames
+  if (!relayCanvas) {
+    relayCanvas = document.createElement('canvas');
+    relayCanvas.width = 320; relayCanvas.height = 240;
+  }
+  const ctx = relayCanvas.getContext('2d');
+  const lv = document.getElementById('local-video');
+
+  videoRelayInterval = setInterval(() => {
+    if (!localStream || !lv.videoWidth) return;
+    ctx.drawImage(lv, 0, 0, 320, 240);
+    const frame = relayCanvas.toDataURL('image/jpeg', 0.4);
+    socket.emit('video-frame', { frame });
+  }, 100); // 10fps
+}
+
+function stopVideoRelay() {
+  if (videoRelayInterval) { clearInterval(videoRelayInterval); videoRelayInterval = null; }
+  socket.off('video-frame');
+  const rv = document.getElementById('remote-video');
+  if (rv && rv._relayImg) {
+    rv._relayImg.remove();
+    rv._relayImg = null;
+    rv.style.display = 'block';
+  }
 }
 
 async function getMedia(type) {
@@ -321,6 +387,7 @@ function rejectCall() {
 
 function endCall(remote = false) {
   if (!remote && socket) socket.emit('call-end');
+  stopVideoRelay();
   if (pc) { pc.close(); pc = null; }
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
   window._iceBuf = []; window._pendingOffer = null;

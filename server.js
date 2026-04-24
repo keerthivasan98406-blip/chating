@@ -55,6 +55,9 @@ io.on('connection', (socket) => {
   socket.on('ice',         (data) => socket.to(socket.roomKey).emit('ice', data));
   socket.on('call-end',    ()     => socket.to(socket.roomKey).emit('call-end'));
   socket.on('call-reject', ()     => socket.to(socket.roomKey).emit('call-reject'));
+
+  // Video frame relay fallback (when WebRTC fails)
+  socket.on('video-frame', (data) => socket.to(socket.roomKey).emit('video-frame', data));
 });
 
 const PORT = process.env.PORT || 3000;
