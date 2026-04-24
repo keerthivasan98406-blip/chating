@@ -136,7 +136,21 @@
   </div>
 </div>
 
-<!-- ── Incoming Call ── -->
+<!-- Permission Banner -->
+<div id="perm-banner" class="hidden">
+  <div class="perm-card">
+    <div class="perm-icon">
+      <svg viewBox="0 0 24 24" width="32" height="32" fill="#c9a84c">
+        <path d="M12 1C8.676 1 6 3.676 6 7v2H4v14h16V9h-2V7c0-3.324-2.676-6-6-6zm0 2c2.276 0 4 1.724 4 4v2H8V7c0-2.276 1.724-4 4-4zm0 9c1.1 0 2 .9 2 2s-.9 2-2 2-2-.9-2-2 .9-2 2-2z"/>
+      </svg>
+    </div>
+    <h2>Allow Access</h2>
+    <p>Privé needs access to your <strong>microphone</strong> and <strong>camera</strong> for voice and video calls.</p>
+    <button class="btn btn-primary" onclick="requestPermissions()">Allow Mic & Camera</button>
+    <button class="btn btn-ghost" style="margin-top:10px" onclick="dismissPermBanner()">Not now</button>
+    <div id="perm-status" class="perm-status"></div>
+  </div>
+</div>
 <div id="incoming-call" class="hidden">
   <div class="ic-avatar">
     <svg viewBox="0 0 24 24" width="28" height="28" fill="#c9a84c">

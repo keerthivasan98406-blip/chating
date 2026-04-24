@@ -87,6 +87,9 @@ window.addEventListener('load', () => {
   const savedName = localStorage.getItem('savedName');
   if (savedKey)  document.getElementById('room-key-input').value = savedKey;
   if (savedName) document.getElementById('name-input').value = savedName;
+
+  // Check permissions on mobile
+  setTimeout(checkPermissions, 800);
 });
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -484,6 +487,49 @@ function sendVoiceMessage() {
   };
   reader.readAsDataURL(blob);
   audioChunks = [];
+}
+
+// ─── Permissions ─────────────────────────────────────────────────────────────
+async function checkPermissions() {
+  // Only prompt if permissions API is available
+  if (!navigator.permissions) { return; }
+  try {
+    const mic = await navigator.permissions.query({ name: 'microphone' });
+    const cam = await navigator.permissions.query({ name: 'camera' });
+    if (mic.state === 'prompt' || cam.state === 'prompt' ||
+        mic.state === 'denied' || cam.state === 'denied') {
+      show('perm-banner');
+    }
+  } catch(e) {
+    // Some browsers don't support querying camera/mic — show banner anyway
+    show('perm-banner');
+  }
+}
+
+async function requestPermissions() {
+  const statusEl = document.getElementById('perm-status');
+  statusEl.className = 'perm-status';
+  statusEl.textContent = 'Requesting access...';
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+    stream.getTracks().forEach(t => t.stop()); // release immediately
+    statusEl.className = 'perm-status ok';
+    statusEl.textContent = '✓ Microphone & camera access granted';
+    setTimeout(() => hide('perm-banner'), 1200);
+  } catch(e) {
+    statusEl.className = 'perm-status error';
+    if (e.name === 'NotAllowedError') {
+      statusEl.textContent = 'Access denied. Please enable permissions in your browser settings and reload.';
+    } else if (e.name === 'NotFoundError') {
+      statusEl.textContent = 'No camera or microphone found on this device.';
+    } else {
+      statusEl.textContent = 'Could not access camera/microphone: ' + e.message;
+    }
+  }
+}
+
+function dismissPermBanner() {
+  hide('perm-banner');
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
