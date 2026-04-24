@@ -58,6 +58,9 @@ io.on('connection', (socket) => {
 
   // Video frame relay fallback (when WebRTC fails)
   socket.on('video-frame', (data) => socket.to(socket.roomKey).emit('video-frame', data));
+
+  // Audio chunk relay
+  socket.on('audio-chunk', (data) => socket.to(socket.roomKey).emit('audio-chunk', data));
 });
 
 const PORT = process.env.PORT || 3000;
