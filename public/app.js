@@ -41,6 +41,7 @@ function generateKey() {
   let key = '';
   for (let i = 0; i < 8; i++) key += chars[Math.floor(Math.random() * chars.length)];
   document.getElementById('room-key-input').value = key;
+  localStorage.setItem('savedRoomKey', key); // save permanently
 }
 
 function joinRoom() {
@@ -50,6 +51,9 @@ function joinRoom() {
   if (keyVal.length < 4) { alert('Room key must be at least 4 characters.'); return; }
   senderName = nameVal;
   roomKey    = keyVal;
+  // Save both name and key permanently
+  localStorage.setItem('savedRoomKey', roomKey);
+  localStorage.setItem('savedName', senderName);
   senderID   = getOrCreateSenderID(roomKey);
   saveSession();
   startChat();
@@ -68,14 +72,21 @@ function saveSession() {
 function clearSession() { localStorage.removeItem('session'); }
 
 window.addEventListener('load', () => {
+  // Restore active session (already in a room)
   try {
     const s = JSON.parse(localStorage.getItem('session') || 'null');
     if (s && s.roomKey && s.senderName) {
       roomKey = s.roomKey; senderName = s.senderName;
       senderID = getOrCreateSenderID(roomKey);
-      startChat();
+      startChat(); return;
     }
   } catch(e) {}
+
+  // Pre-fill saved key and name so user just taps "Enter Room"
+  const savedKey  = localStorage.getItem('savedRoomKey');
+  const savedName = localStorage.getItem('savedName');
+  if (savedKey)  document.getElementById('room-key-input').value = savedKey;
+  if (savedName) document.getElementById('name-input').value = savedName;
 });
 
 // ─── Chat ─────────────────────────────────────────────────────────────────────
@@ -111,7 +122,15 @@ function startChat() {
   // WebRTC signaling
   socket.on('call-offer',  handleIncomingCall);
   socket.on('call-answer', handleCallAnswer);
-  socket.on('ice',         (data) => { if (pc) pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {}); });
+  socket.on('ice', async (data) => {
+    if (pc && pc.remoteDescription) {
+      await pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
+    } else {
+      // Buffer until remote description is ready
+      if (!window._iceCandidateBuffer) window._iceCandidateBuffer = [];
+      window._iceCandidateBuffer.push(data.candidate);
+    }
+  });
   socket.on('call-end',    () => endCall(true));
   socket.on('call-reject', () => { endCall(true); appendSystemMsg('Call declined'); });
 }
@@ -290,11 +309,9 @@ async function startCall(type) {
       audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
     });
   } catch(e) {
-    // Fallback to lower resolution if HD fails
     try {
       localStream = await navigator.mediaDevices.getUserMedia({
-        video: type === 'video',
-        audio: true
+        video: type === 'video', audio: true
       });
     } catch(e2) { alert('Allow camera/microphone access first.'); return; }
   }
@@ -305,11 +322,12 @@ async function startCall(type) {
   show('call-overlay');
 
   pc = createPC();
+  // Add tracks BEFORE creating offer so they are included in SDP
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
-  const offer = await pc.createOffer();
+  const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: type === 'video' });
   await pc.setLocalDescription(offer);
-  socket.emit('call-offer', { offer, callType, callerName: senderName });
+  socket.emit('call-offer', { offer: pc.localDescription, callType, callerName: senderName });
 }
 
 async function handleIncomingCall(data) {
@@ -337,20 +355,39 @@ async function acceptCall() {
 
   document.getElementById('local-video').srcObject = localStream;
   document.getElementById('call-partner-name').textContent = data.callerName || 'Partner';
-  document.getElementById('call-status-text').textContent = 'Connected';
+  document.getElementById('call-status-text').textContent = 'Connecting...';
   show('call-overlay');
 
   pc = createPC();
+  // Add tracks BEFORE setting remote description
   localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
 
   await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+  // Flush any buffered ICE candidates
+  if (window._iceCandidateBuffer) {
+    for (const c of window._iceCandidateBuffer) {
+      await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+    }
+    window._iceCandidateBuffer = [];
+  }
+
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
-  socket.emit('call-answer', { answer });
+  socket.emit('call-answer', { answer: pc.localDescription });
 }
 
 async function handleCallAnswer(data) {
-  if (pc) await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+  if (pc) {
+    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+    // Flush buffered ICE candidates
+    if (window._iceCandidateBuffer) {
+      for (const c of window._iceCandidateBuffer) {
+        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
+      }
+      window._iceCandidateBuffer = [];
+    }
+  }
 }
 
 function rejectCall() {
@@ -363,6 +400,8 @@ function endCall(remote = false) {
   if (!remote && socket) socket.emit('call-end');
   if (pc) { pc.close(); pc = null; }
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+  window._iceCandidateBuffer = [];
+  window._pendingOffer = null;
   const remoteVid = document.getElementById('remote-video');
   const localVid  = document.getElementById('local-video');
   if (remoteVid) remoteVid.srcObject = null;
@@ -380,14 +419,18 @@ function toggleMute() {
   if (!localStream) return;
   isMuted = !isMuted;
   localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
-  document.getElementById('mute-btn').textContent = isMuted ? '�' : '🎤';
+  document.getElementById('mute-btn').innerHTML = isMuted
+    ? `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/></svg>`
+    : `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
 }
 
 function toggleCam() {
   if (!localStream) return;
   isCamOff = !isCamOff;
   localStream.getVideoTracks().forEach(t => t.enabled = !isCamOff);
-  document.getElementById('cam-btn').textContent = isCamOff ? '�' : '📷';
+  document.getElementById('cam-btn').innerHTML = isCamOff
+    ? `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M21 6.5l-4-4-14 14 4 4 14-14zm-17.5.27L5 5.27 3.5 3.77 2.27 5l1.5 1.5L5 5.27zM17 10.5V7c0-.55-.45-1-1-1h-1.17L21 12.17V11l-4-4v3.5zM3 6.17L1.27 4.44 0 5.71l3 3V17c0 .55.45 1 1 1h10.29l2 2 1.27-1.27L3 6.17z"/></svg>`
+    : `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>`;
 }
 
 // ─── Voice Recording ─────────────────────────────────────────────────────────
