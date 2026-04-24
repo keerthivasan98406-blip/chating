@@ -1,38 +1,19 @@
 // ─── State ───────────────────────────────────────────────────────────────────
-let roomKey = null, senderID = null, senderName = null;
-let socket = null;
-
-// WebRTC
+let roomKey = null, senderID = null, senderName = null, socket = null;
 let pc = null, localStream = null, callType = null;
 let isMuted = false, isCamOff = false;
 
 const iceServers = {
   iceServers: [
     { urls: 'stun:stun.l.google.com:19302' },
+    { urls: 'stun:global.stun.twilio.com:3478' },
     { urls: 'stun:stun1.l.google.com:19302' },
     { urls: 'stun:stun2.l.google.com:19302' },
-    { urls: 'stun:stun3.l.google.com:19302' },
-    {
-      urls: 'turn:openrelay.metered.ca:80',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    },
-    {
-      urls: 'turn:openrelay.metered.ca:80?transport=tcp',
-      username: 'openrelayproject',
-      credential: 'openrelayproject'
-    }
-  ]
+    { urls: 'turn:openrelay.metered.ca:80',      username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443',     username: 'openrelayproject', credential: 'openrelayproject' },
+    { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelayproject', credential: 'openrelayproject' }
+  ],
+  iceCandidatePoolSize: 10
 };
 
 // ─── Entry ────────────────────────────────────────────────────────────────────
@@ -41,7 +22,7 @@ function generateKey() {
   let key = '';
   for (let i = 0; i < 8; i++) key += chars[Math.floor(Math.random() * chars.length)];
   document.getElementById('room-key-input').value = key;
-  localStorage.setItem('savedRoomKey', key); // save permanently
+  localStorage.setItem('savedRoomKey', key);
 }
 
 function joinRoom() {
@@ -49,14 +30,11 @@ function joinRoom() {
   const keyVal  = document.getElementById('room-key-input').value.trim().toUpperCase();
   if (!nameVal) { alert('Enter your name.'); return; }
   if (keyVal.length < 4) { alert('Room key must be at least 4 characters.'); return; }
-  senderName = nameVal;
-  roomKey    = keyVal;
-  // Save both name and key permanently
+  senderName = nameVal; roomKey = keyVal;
   localStorage.setItem('savedRoomKey', roomKey);
   localStorage.setItem('savedName', senderName);
-  senderID   = getOrCreateSenderID(roomKey);
-  saveSession();
-  startChat();
+  senderID = getOrCreateSenderID(roomKey);
+  saveSession(); startChat();
 }
 
 function getOrCreateSenderID(key) {
@@ -66,13 +44,10 @@ function getOrCreateSenderID(key) {
   return id;
 }
 
-function saveSession() {
-  localStorage.setItem('session', JSON.stringify({ roomKey, senderName }));
-}
+function saveSession()  { localStorage.setItem('session', JSON.stringify({ roomKey, senderName })); }
 function clearSession() { localStorage.removeItem('session'); }
 
 window.addEventListener('load', () => {
-  // Restore active session (already in a room)
   try {
     const s = JSON.parse(localStorage.getItem('session') || 'null');
     if (s && s.roomKey && s.senderName) {
@@ -81,14 +56,10 @@ window.addEventListener('load', () => {
       startChat(); return;
     }
   } catch(e) {}
-
-  // Pre-fill saved key and name so user just taps "Enter Room"
   const savedKey  = localStorage.getItem('savedRoomKey');
   const savedName = localStorage.getItem('savedName');
   if (savedKey)  document.getElementById('room-key-input').value = savedKey;
   if (savedName) document.getElementById('name-input').value = savedName;
-
-  // Check permissions on mobile
   setTimeout(checkPermissions, 800);
 });
 
@@ -96,42 +67,25 @@ window.addEventListener('load', () => {
 function startChat() {
   show('chat-screen'); hide('entry-screen');
   document.getElementById('room-display').textContent = senderName + '  ·  ' + roomKey;
-
   socket = io();
-
   socket.emit('join', { roomKey, senderName, senderID });
-
-  // Load history from server
-  socket.on('history', (msgs) => {
-    msgs.forEach(renderMessage);
-  });
-
-  // Incoming message from other device
-  socket.on('message', (msg) => {
-    saveMessageLocal(msg);
-    renderMessage(msg);
-  });
-
-  // Delete signal from other device
-  socket.on('delete', () => {
+  socket.on('history', msgs => msgs.forEach(renderMessage));
+  socket.on('message', msg  => { saveMessageLocal(msg); renderMessage(msg); });
+  socket.on('delete',  ()   => {
     localStorage.removeItem('msgs_' + roomKey);
     clearSession();
     window.close();
-    // fallback if window.close() is blocked
     document.body.innerHTML = '';
     window.location.replace('about:blank');
   });
-
-  // WebRTC signaling
   socket.on('call-offer',  handleIncomingCall);
   socket.on('call-answer', handleCallAnswer);
-  socket.on('ice', async (data) => {
+  socket.on('ice', async data => {
     if (pc && pc.remoteDescription) {
       await pc.addIceCandidate(new RTCIceCandidate(data.candidate)).catch(() => {});
     } else {
-      // Buffer until remote description is ready
-      if (!window._iceCandidateBuffer) window._iceCandidateBuffer = [];
-      window._iceCandidateBuffer.push(data.candidate);
+      if (!window._iceBuf) window._iceBuf = [];
+      window._iceBuf.push(data.candidate);
     }
   });
   socket.on('call-end',    () => endCall(true));
@@ -153,9 +107,7 @@ function sendMessage() {
   if (!text || !socket) return;
   input.value = '';
   const msg = { type: 'text', text, sender: senderID, name: senderName, time: Date.now() };
-  renderMessage(msg);
-  saveMessageLocal(msg);
-  socket.emit('message', msg);
+  renderMessage(msg); saveMessageLocal(msg); socket.emit('message', msg);
 }
 
 function sendImage(event) {
@@ -167,9 +119,7 @@ function sendImage(event) {
     const data = e.target.result;
     if (data.length > 2 * 1024 * 1024) { alert('Image too large (max ~1.5MB).'); return; }
     const msg = { type: 'image', data, sender: senderID, name: senderName, time: Date.now() };
-    renderMessage(msg);
-    saveMessageLocal(msg);
-    socket.emit('message', msg);
+    renderMessage(msg); saveMessageLocal(msg); socket.emit('message', msg);
   };
   reader.readAsDataURL(file);
 }
@@ -180,12 +130,11 @@ function deleteAll() {
   clearSession();
   if (socket) socket.emit('delete');
   window.close();
-  // fallback if window.close() is blocked by browser
   document.body.innerHTML = '';
   window.location.replace('about:blank');
 }
 
-// ─── Local storage (for refresh persistence) ──────────────────────────────────
+// ─── Storage ──────────────────────────────────────────────────────────────────
 function saveMessageLocal(msg) {
   const k = 'msgs_' + roomKey;
   const list = JSON.parse(localStorage.getItem(k) || '[]');
@@ -199,19 +148,15 @@ function saveMessageLocal(msg) {
 function renderMessage(data) {
   const box = document.getElementById('messages');
   const isMe = data.sender === senderID;
-
   const wrap = document.createElement('div');
   wrap.className = 'msg-wrap ' + (isMe ? 'me' : 'them');
-
   const bubble = document.createElement('div');
   bubble.className = 'msg';
-
   if (!isMe && data.name) {
     const n = document.createElement('div');
     n.className = 'msg-name'; n.textContent = data.name;
     bubble.appendChild(n);
   }
-
   if (data.type === 'image') {
     const img = document.createElement('img');
     img.src = data.data; img.alt = 'image';
@@ -219,25 +164,19 @@ function renderMessage(data) {
     bubble.appendChild(img);
   } else if (data.type === 'audio') {
     const audio = document.createElement('audio');
-    audio.controls = true;
-    audio.src = data.data;
+    audio.controls = true; audio.src = data.data;
     bubble.appendChild(audio);
   } else {
     const span = document.createElement('span');
     span.textContent = data.text;
     bubble.appendChild(span);
   }
-
   const footer = document.createElement('div');
   footer.className = 'msg-footer';
   const t = document.createElement('span');
   t.className = 'msg-time'; t.textContent = formatTime(data.time);
   footer.appendChild(t);
-  if (isMe) {
-    const tick = document.createElement('span');
-    tick.className = 'tick'; tick.textContent = '✓✓';
-    footer.appendChild(tick);
-  }
+  if (isMe) { const tick = document.createElement('span'); tick.className = 'tick'; tick.textContent = '✓✓'; footer.appendChild(tick); }
   bubble.appendChild(footer);
   wrap.appendChild(bubble);
   box.appendChild(wrap);
@@ -245,18 +184,13 @@ function renderMessage(data) {
 }
 
 function clearChatUI() { document.getElementById('messages').innerHTML = ''; }
-
 function appendSystemMsg(text) {
   const box = document.getElementById('messages');
   const d = document.createElement('div');
   d.className = 'system-msg'; d.textContent = text;
   box.appendChild(d); box.scrollTop = box.scrollHeight;
 }
-
-function formatTime(ts) {
-  return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-}
-
+function formatTime(ts) { return new Date(ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
 function openLightbox(src) {
   const lb = document.createElement('div');
   lb.className = 'lightbox'; lb.onclick = () => lb.remove();
@@ -264,60 +198,60 @@ function openLightbox(src) {
   lb.appendChild(img); document.body.appendChild(lb);
 }
 
-// ─── WebRTC Calls ─────────────────────────────────────────────────────────────
+// ─── WebRTC ───────────────────────────────────────────────────────────────────
 function createPC() {
   const p = new RTCPeerConnection(iceServers);
 
   p.onicecandidate = e => {
-    if (e.candidate) socket.emit('ice', { candidate: e.candidate });
+    if (e.candidate) socket.emit('ice', { candidate: e.candidate.toJSON() });
   };
 
-  // When remote stream arrives, attach to video element
   p.ontrack = e => {
-    const remoteVid = document.getElementById('remote-video');
-    if (remoteVid.srcObject !== e.streams[0]) {
-      remoteVid.srcObject = e.streams[0];
-      document.getElementById('call-status-text').textContent = 'Connected';
+    console.log('ontrack:', e.track.kind);
+    const rv = document.getElementById('remote-video');
+    if (e.streams && e.streams[0]) {
+      rv.srcObject = e.streams[0];
+    } else {
+      if (!rv.srcObject) rv.srcObject = new MediaStream();
+      rv.srcObject.addTrack(e.track);
     }
+    rv.play().catch(() => {});
+    document.getElementById('call-status-text').textContent = 'Connected';
   };
 
-  // Monitor connection state — show status to user
   p.onconnectionstatechange = () => {
-    const statusEl = document.getElementById('call-status-text');
-    if (!statusEl) return;
-    switch (p.connectionState) {
-      case 'connecting':    statusEl.textContent = 'Connecting...'; break;
-      case 'connected':     statusEl.textContent = 'Connected'; break;
-      case 'disconnected':  statusEl.textContent = 'Reconnecting...'; break;
-      case 'failed':
-        statusEl.textContent = 'Connection failed — retrying...';
-        p.restartIce(); // auto retry ICE
-        break;
-      case 'closed': break;
-    }
+    console.log('connectionState:', p.connectionState);
+    const s = document.getElementById('call-status-text');
+    if (!s) return;
+    if (p.connectionState === 'connected')    s.textContent = 'Connected';
+    if (p.connectionState === 'disconnected') s.textContent = 'Reconnecting...';
+    if (p.connectionState === 'failed')       { s.textContent = 'Retrying...'; p.restartIce(); }
   };
 
   p.oniceconnectionstatechange = () => {
+    console.log('iceState:', p.iceConnectionState);
     if (p.iceConnectionState === 'failed') p.restartIce();
   };
 
   return p;
 }
 
-async function startCall(type) {
-  callType = type;
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: type === 'video' ? { width: 1280, height: 720, facingMode: 'user' } : false,
-      audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
-    });
-  } catch(e) {
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({
-        video: type === 'video', audio: true
-      });
-    } catch(e2) { alert('Allow camera/microphone access first.'); return; }
+async function getMedia(type) {
+  const tries = [
+    { video: type === 'video' ? { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } : false, audio: { echoCancellation: true, noiseSuppression: true } },
+    { video: type === 'video', audio: true }
+  ];
+  for (const c of tries) {
+    try { return await navigator.mediaDevices.getUserMedia(c); } catch(e) { console.warn('getUserMedia failed', e); }
   }
+  throw new Error('Media access denied');
+}
+
+async function startCall(type) {
+  if (pc) endCall(true);
+  callType = type;
+  try { localStream = await getMedia(type); }
+  catch(e) { alert('Allow camera/microphone access first.'); return; }
 
   document.getElementById('local-video').srcObject = localStream;
   document.getElementById('call-partner-name').textContent = senderName;
@@ -325,8 +259,7 @@ async function startCall(type) {
   show('call-overlay');
 
   pc = createPC();
-  // Add tracks BEFORE creating offer so they are included in SDP
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  localStream.getTracks().forEach(t => { console.log('addTrack caller:', t.kind); pc.addTrack(t, localStream); });
 
   const offer = await pc.createOffer({ offerToReceiveAudio: true, offerToReceiveVideo: type === 'video' });
   await pc.setLocalDescription(offer);
@@ -343,18 +276,11 @@ async function handleIncomingCall(data) {
 async function acceptCall() {
   hide('incoming-call');
   const data = window._pendingOffer;
+  if (!data) return;
   callType = data.callType;
 
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({
-      video: callType === 'video' ? { width: 1280, height: 720, facingMode: 'user' } : false,
-      audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 44100 }
-    });
-  } catch(e) {
-    try {
-      localStream = await navigator.mediaDevices.getUserMedia({ video: callType === 'video', audio: true });
-    } catch(e2) { alert('Allow camera/microphone access first.'); return; }
-  }
+  try { localStream = await getMedia(callType); }
+  catch(e) { alert('Allow camera/microphone access first.'); return; }
 
   document.getElementById('local-video').srcObject = localStream;
   document.getElementById('call-partner-name').textContent = data.callerName || 'Partner';
@@ -362,18 +288,15 @@ async function acceptCall() {
   show('call-overlay');
 
   pc = createPC();
-  // Add tracks BEFORE setting remote description
-  localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+  localStream.getTracks().forEach(t => { console.log('addTrack callee:', t.kind); pc.addTrack(t, localStream); });
 
   await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+  console.log('setRemoteDescription done (callee)');
 
-  // Flush any buffered ICE candidates
-  if (window._iceCandidateBuffer) {
-    for (const c of window._iceCandidateBuffer) {
-      await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-    }
-    window._iceCandidateBuffer = [];
+  for (const c of (window._iceBuf || [])) {
+    await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.warn('ICE flush err', e));
   }
+  window._iceBuf = [];
 
   const answer = await pc.createAnswer();
   await pc.setLocalDescription(answer);
@@ -381,21 +304,18 @@ async function acceptCall() {
 }
 
 async function handleCallAnswer(data) {
-  if (pc) {
-    await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
-    // Flush buffered ICE candidates
-    if (window._iceCandidateBuffer) {
-      for (const c of window._iceCandidateBuffer) {
-        await pc.addIceCandidate(new RTCIceCandidate(c)).catch(() => {});
-      }
-      window._iceCandidateBuffer = [];
-    }
+  if (!pc) return;
+  await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+  console.log('setRemoteDescription done (caller)');
+  for (const c of (window._iceBuf || [])) {
+    await pc.addIceCandidate(new RTCIceCandidate(c)).catch(e => console.warn('ICE flush err', e));
   }
+  window._iceBuf = [];
 }
 
 function rejectCall() {
   hide('incoming-call');
-  socket.emit('call-reject');
+  if (socket) socket.emit('call-reject');
   window._pendingOffer = null;
 }
 
@@ -403,43 +323,40 @@ function endCall(remote = false) {
   if (!remote && socket) socket.emit('call-end');
   if (pc) { pc.close(); pc = null; }
   if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-  window._iceCandidateBuffer = [];
-  window._pendingOffer = null;
-  const remoteVid = document.getElementById('remote-video');
-  const localVid  = document.getElementById('local-video');
-  if (remoteVid) remoteVid.srcObject = null;
-  if (localVid)  localVid.srcObject  = null;
-  hide('call-overlay');
-  hide('incoming-call');
+  window._iceBuf = []; window._pendingOffer = null;
+  const rv = document.getElementById('remote-video');
+  const lv = document.getElementById('local-video');
+  if (rv) rv.srcObject = null;
+  if (lv) lv.srcObject = null;
+  hide('call-overlay'); hide('incoming-call');
   isMuted = false; isCamOff = false;
-  const muteBtn = document.getElementById('mute-btn');
-  const camBtn  = document.getElementById('cam-btn');
-  if (muteBtn) muteBtn.innerHTML = `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
-  if (camBtn)  camBtn.innerHTML  = `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>`;
+  const mb = document.getElementById('mute-btn');
+  const cb = document.getElementById('cam-btn');
+  if (mb) mb.innerHTML = svgMic();
+  if (cb) cb.innerHTML = svgCam();
 }
 
 function toggleMute() {
   if (!localStream) return;
   isMuted = !isMuted;
   localStream.getAudioTracks().forEach(t => t.enabled = !isMuted);
-  document.getElementById('mute-btn').innerHTML = isMuted
-    ? `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/></svg>`
-    : `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`;
+  document.getElementById('mute-btn').innerHTML = isMuted ? svgMicOff() : svgMic();
 }
 
 function toggleCam() {
   if (!localStream) return;
   isCamOff = !isCamOff;
   localStream.getVideoTracks().forEach(t => t.enabled = !isCamOff);
-  document.getElementById('cam-btn').innerHTML = isCamOff
-    ? `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M21 6.5l-4-4-14 14 4 4 14-14zm-17.5.27L5 5.27 3.5 3.77 2.27 5l1.5 1.5L5 5.27zM17 10.5V7c0-.55-.45-1-1-1h-1.17L21 12.17V11l-4-4v3.5zM3 6.17L1.27 4.44 0 5.71l3 3V17c0 .55.45 1 1 1h10.29l2 2 1.27-1.27L3 6.17z"/></svg>`
-    : `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>`;
+  document.getElementById('cam-btn').innerHTML = isCamOff ? svgCamOff() : svgCam();
 }
 
-// ─── Voice Recording ─────────────────────────────────────────────────────────
-let mediaRecorder = null;
-let audioChunks = [];
-let recordingStream = null;
+function svgMic()    { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>`; }
+function svgMicOff() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19 11h-1.7c0 .74-.16 1.43-.43 2.05l1.23 1.23c.56-.98.9-2.09.9-3.28zm-4.02.17c0-.06.02-.11.02-.17V5c0-1.66-1.34-3-3-3S9 3.34 9 5v.18l5.98 5.99zM4.27 3L3 4.27l6.01 6.01V11c0 1.66 1.33 3 2.99 3 .22 0 .44-.03.65-.08l1.66 1.66c-.71.33-1.5.52-2.31.52-2.76 0-5.3-2.1-5.3-5.1H5c0 3.41 2.72 6.23 6 6.72V21h2v-3.28c.91-.13 1.77-.45 2.54-.9L19.73 21 21 19.73 4.27 3z"/></svg>`; }
+function svgCam()    { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M17 10.5V7c0-.55-.45-1-1-1H4c-.55 0-1 .45-1 1v10c0 .55.45 1 1 1h12c.55 0 1-.45 1-1v-3.5l4 4v-11l-4 4z"/></svg>`; }
+function svgCamOff() { return `<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M21 6.5l-4-4-14 14 4 4 14-14zm-2.5 9.17L17 14.17V13l-4-4v1.17L6.83 4H16c.55 0 1 .45 1 1v3.5l4-4v11l-1.5-1.5zM3 6.17L1.27 4.44 0 5.71l3 3V17c0 .55.45 1 1 1h10.29l2 2 1.27-1.27L3 6.17z"/></svg>`; }
+
+// ─── Voice Recording ──────────────────────────────────────────────────────────
+let mediaRecorder = null, audioChunks = [], recordingStream = null;
 
 async function startRecording(e) {
   if (e) e.preventDefault();
@@ -452,9 +369,7 @@ async function startRecording(e) {
     mediaRecorder.onstop = sendVoiceMessage;
     mediaRecorder.start();
     document.getElementById('mic-btn').classList.add('recording');
-  } catch(err) {
-    alert('Microphone access denied.');
-  }
+  } catch(e) { alert('Microphone access denied.'); }
 }
 
 function stopRecording(e) {
@@ -462,75 +377,51 @@ function stopRecording(e) {
   if (mediaRecorder && mediaRecorder.state !== 'inactive') {
     mediaRecorder.stop();
     recordingStream.getTracks().forEach(t => t.stop());
-    mediaRecorder = null;
-    recordingStream = null;
+    mediaRecorder = null; recordingStream = null;
     document.getElementById('mic-btn').classList.remove('recording');
   }
 }
 
 function sendVoiceMessage() {
-  if (audioChunks.length === 0) return;
+  if (!audioChunks.length) return;
   const blob = new Blob(audioChunks, { type: 'audio/webm' });
-  if (blob.size > 3 * 1024 * 1024) { alert('Voice message too long (max ~3MB).'); return; }
+  if (blob.size > 3 * 1024 * 1024) { alert('Voice message too long.'); return; }
   const reader = new FileReader();
   reader.onload = e => {
-    const msg = {
-      type: 'audio',
-      data: e.target.result,
-      sender: senderID,
-      name: senderName,
-      time: Date.now()
-    };
-    renderMessage(msg);
-    saveMessageLocal(msg);
-    socket.emit('message', msg);
+    const msg = { type: 'audio', data: e.target.result, sender: senderID, name: senderName, time: Date.now() };
+    renderMessage(msg); saveMessageLocal(msg); socket.emit('message', msg);
   };
   reader.readAsDataURL(blob);
   audioChunks = [];
 }
 
-// ─── Permissions ─────────────────────────────────────────────────────────────
+// ─── Permissions ──────────────────────────────────────────────────────────────
 async function checkPermissions() {
-  // Only prompt if permissions API is available
-  if (!navigator.permissions) { return; }
+  if (!navigator.permissions) { show('perm-banner'); return; }
   try {
     const mic = await navigator.permissions.query({ name: 'microphone' });
     const cam = await navigator.permissions.query({ name: 'camera' });
-    if (mic.state === 'prompt' || cam.state === 'prompt' ||
-        mic.state === 'denied' || cam.state === 'denied') {
-      show('perm-banner');
-    }
-  } catch(e) {
-    // Some browsers don't support querying camera/mic — show banner anyway
-    show('perm-banner');
-  }
+    if (mic.state !== 'granted' || cam.state !== 'granted') show('perm-banner');
+  } catch(e) { show('perm-banner'); }
 }
 
 async function requestPermissions() {
-  const statusEl = document.getElementById('perm-status');
-  statusEl.className = 'perm-status';
-  statusEl.textContent = 'Requesting access...';
+  const s = document.getElementById('perm-status');
+  s.className = 'perm-status'; s.textContent = 'Requesting access...';
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-    stream.getTracks().forEach(t => t.stop()); // release immediately
-    statusEl.className = 'perm-status ok';
-    statusEl.textContent = '✓ Microphone & camera access granted';
+    stream.getTracks().forEach(t => t.stop());
+    s.className = 'perm-status ok'; s.textContent = '✓ Access granted';
     setTimeout(() => hide('perm-banner'), 1200);
   } catch(e) {
-    statusEl.className = 'perm-status error';
-    if (e.name === 'NotAllowedError') {
-      statusEl.textContent = 'Access denied. Please enable permissions in your browser settings and reload.';
-    } else if (e.name === 'NotFoundError') {
-      statusEl.textContent = 'No camera or microphone found on this device.';
-    } else {
-      statusEl.textContent = 'Could not access camera/microphone: ' + e.message;
-    }
+    s.className = 'perm-status error';
+    s.textContent = e.name === 'NotAllowedError'
+      ? 'Denied. Enable permissions in browser settings and reload.'
+      : 'Error: ' + e.message;
   }
 }
 
-function dismissPermBanner() {
-  hide('perm-banner');
-}
+function dismissPermBanner() { hide('perm-banner'); }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 function show(id) { document.getElementById(id).classList.remove('hidden'); }
